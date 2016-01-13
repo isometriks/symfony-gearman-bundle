@@ -4,3 +4,6 @@ services:
     laelaps.gearman.worker:
         class: GearmanWorker
         scope: prototype
+    laelaps.event_listener.doctrine_subscriber:
+        class: Laelaps\GearmanBundle\EventListener\DoctrineSubscriber
+        tags: ['kernel.event_subscriber']

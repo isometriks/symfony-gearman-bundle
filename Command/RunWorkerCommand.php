@@ -5,10 +5,9 @@ namespace Laelaps\GearmanBundle\Command;
 use GearmanJob;
 use GearmanWorker;
 use Laelaps\GearmanBundle\Annotation\PointOfEntry as PointOfEntryAnnotation;
+use Laelaps\GearmanBundle\Event\Events;
+use Laelaps\GearmanBundle\Event\JobEvent;
 use Laelaps\GearmanBundle\Worker;
-use ReflectionMethod;
-use ReflectionObject;
-use RuntimeException;
 use Symfony\Bundle\FrameworkBundle\Command\ContainerAwareCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -40,8 +39,8 @@ class RunWorkerCommand extends ContainerAwareCommand
     }
 
     /**
-     * @param Symfony\Component\Console\Input\InputInterface $input
-     * @param Symfony\Component\Console\Output\OutputInterface $output
+     * @param InputInterface $input
+     * @param OutputInterface $output
      * @return void
      */
     protected function execute(InputInterface $input, OutputInterface $output)
@@ -97,9 +96,9 @@ class RunWorkerCommand extends ContainerAwareCommand
 
     /**
      * @param string $filename
-     * @param Symfony\Component\Console\Output\OutputInterface $output
-     * @return Laelaps\GearmanBundle\Worker
-     */
+     * @param OutputInterface $output
+     * @return Worker
+    */
     public function instantiateWorker($filename, OutputInterface $output)
     {
         $className = $this->readWorkerClassName($filename, $output);
@@ -108,12 +107,12 @@ class RunWorkerCommand extends ContainerAwareCommand
             // worker is out of autoloader scope
             require_once $filename;
             if (!class_exists($className)) {
-                throw new RuntimeException(sprintf('Unable to load class "%s"', $className));
+                throw new \RuntimeException(sprintf('Unable to load class "%s"', $className));
             }
         }
 
         if (!is_a($className, self::WORKER_CLASS_NAME, $allowString = true)) {
-            throw new RuntimeException(sprintf('Worker "%s" must extend "%s" class.', $filename, self::WORKER_CLASS_NAME));
+            throw new \RuntimeException(sprintf('Worker "%s" must extend "%s" class.', $filename, self::WORKER_CLASS_NAME));
         }
 
         $container = $this->getContainer();
@@ -122,8 +121,8 @@ class RunWorkerCommand extends ContainerAwareCommand
     }
 
     /**
-     * @param Laelaps\GearmanBundle\Worker $worker
-     * @param Symfony\Component\Console\Output\OutputInterface $output
+     * @param Worker $worker
+     * @param OutputInterface $output
      * @return array [ point of entry name => callable point of entry ]
      * @throws RuntimeException
      */
@@ -133,8 +132,8 @@ class RunWorkerCommand extends ContainerAwareCommand
 
         $pointsOfEntry = array();
 
-        $workerReflection = new ReflectionObject($worker);
-        $workerReflectionMethods = $workerReflection->getMethods(ReflectionMethod::IS_PUBLIC);
+        $workerReflection = new \ReflectionObject($worker);
+        $workerReflectionMethods = $workerReflection->getMethods(\ReflectionMethod::IS_PUBLIC);
 
         foreach ($workerReflectionMethods as $reflectionMethod) {
             foreach ($annotationReader->getMethodAnnotations($reflectionMethod) as $annotation) {
@@ -149,14 +148,14 @@ class RunWorkerCommand extends ContainerAwareCommand
 
     /**
      * @param string $filename
-     * @param Symfony\Component\Console\Output\OutputInterface $output
+     * @param OutputInterface $output
      * @return string|null
      * @throws RuntimeException
      */
     public function readWorkerClassName($filename, OutputInterface $output)
     {
         if (!file_exists($filename)) {
-            throw new RuntimeException(sprintf('File "%s" does not exist.', $filename));
+            throw new \RuntimeException(sprintf('File "%s" does not exist.', $filename));
         }
 
         $fileContents = file_get_contents($filename);
@@ -194,18 +193,23 @@ class RunWorkerCommand extends ContainerAwareCommand
         return $this->getContainer()->get('doctrine')->getManager();
     }
 
-    /**
-     * @return \Laelaps\GearmanBundle\Entity\Job
-     */
-    protected function createJob()
+    protected function getEventDispatcher()
     {
-        return new \Laelaps\GearmanBundle\Entity\Job();
+        return $this->getContainer()->get('event_dispatcher');
     }
 
     /**
-     * @param Laelaps\GearmanBundle\Worker $worker
+     * @return Job
+     */
+    protected function createJob()
+    {
+        return new Job();
+    }
+
+    /**
+     * @param Worker $worker
      * @param GearmanWorker $gmworker
-     * @param Symfony\Component\Console\Output\OutputInterface $output
+     * @param OutputInterface $output
      * @return void
      * @throws RuntimeException
      */
@@ -213,7 +217,7 @@ class RunWorkerCommand extends ContainerAwareCommand
     {
         $pointsOfEntry = $this->readPointsOfEntry($worker, $output);
         if (empty($pointsOfEntry)) {
-            throw new RuntimeException(sprintf('No "PointOfEntry" annotations found in public methods of "%s".', get_class($worker)));
+            throw new \RuntimeException(sprintf('No "PointOfEntry" annotations found in public methods of "%s".', get_class($worker)));
         }
 
         foreach ($pointsOfEntry as $entryPointName => $entryPoint) {
@@ -226,9 +230,14 @@ class RunWorkerCommand extends ContainerAwareCommand
                 $job->setStartTime(new \DateTime());
                 $job->setWorkload($gearmanJob->workload());
 
+                // Launch event, like refreshing doctrine
+                $beforeEvent = new JobEvent($gearmanJob, $job);
+                $this->getEventDispatcher()->dispatch(Events::JOB_STARTED, $beforeEvent);
+
                 $manager = $this->getManager();
                 $manager->persist($job);
                 $manager->flush($job);
+
 
                 try {
                     ob_start();
@@ -246,6 +255,11 @@ class RunWorkerCommand extends ContainerAwareCommand
                 $job->setEndTime(new \DateTime());
                 $job->setReturnStatus($taskReturnStatus);
                 $job->setOutput($output);
+
+                // After event
+                $afterEvent = new JobEvent($gearmanJob, $job);
+                $this->getEventDispatcher()->dispatch(Events::JOB_FINISHED, $afterEvent);
+
                 $manager->flush($job);
 
                 gc_collect_cycles();
