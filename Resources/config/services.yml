@@ -6,5 +6,7 @@ services:
         scope: prototype
     laelaps.event_listener.doctrine_subscriber:
         class: Laelaps\GearmanBundle\EventListener\DoctrineSubscriber
+        arguments:
+            - "@doctrine.dbal.default_connection"
         tags:
             - { name: 'kernel.event_subscriber' }
