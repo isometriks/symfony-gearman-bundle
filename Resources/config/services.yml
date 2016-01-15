@@ -6,4 +6,5 @@ services:
         scope: prototype
     laelaps.event_listener.doctrine_subscriber:
         class: Laelaps\GearmanBundle\EventListener\DoctrineSubscriber
-        tags: ['kernel.event_subscriber']
+        tags:
+            - { name: 'kernel.event_subscriber' }
