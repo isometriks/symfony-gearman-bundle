@@ -5,6 +5,7 @@ namespace Laelaps\GearmanBundle\Command;
 use GearmanJob;
 use GearmanWorker;
 use Laelaps\GearmanBundle\Annotation\PointOfEntry as PointOfEntryAnnotation;
+use Laelaps\GearmanBundle\Entity\Job;
 use Laelaps\GearmanBundle\Event\Events;
 use Laelaps\GearmanBundle\Event\JobEvent;
 use Laelaps\GearmanBundle\Worker;
