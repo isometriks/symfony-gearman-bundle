@@ -246,6 +246,7 @@ class RunWorkerCommand extends ContainerAwareCommand
                     $output = ob_get_clean();
                 } catch (\Exception $e) {
                     $output = ob_get_clean();
+                    $taskReturnStatus = false;
 
                     $job->setErrorOutput($e->getMessage());
                 }
