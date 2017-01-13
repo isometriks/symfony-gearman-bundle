@@ -6,12 +6,11 @@ use GearmanJob;
 use GearmanWorker;
 use Laelaps\GearmanBundle\Annotation\PointOfEntry as PointOfEntryAnnotation;
 use Laelaps\GearmanBundle\Entity\Job;
-use Laelaps\GearmanBundle\Event\Events;
-use Laelaps\GearmanBundle\Event\JobEvent;
 use Laelaps\GearmanBundle\Worker;
 use Symfony\Bundle\FrameworkBundle\Command\ContainerAwareCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
@@ -231,23 +230,17 @@ class RunWorkerCommand extends ContainerAwareCommand
                 $job->setStartTime(new \DateTime());
                 $job->setWorkload($gearmanJob->workload());
 
-                // Launch event, like refreshing doctrine
-                $beforeEvent = new JobEvent($gearmanJob, $job);
-                $this->getEventDispatcher()->dispatch(Events::JOB_STARTED, $beforeEvent);
-
                 $manager = $this->getManager();
                 $manager->persist($job);
                 $manager->flush($job);
 
+                // Buffer the output
+                $bufferedOutput = new BufferedOutput();
 
                 try {
                     ob_start();
-                    $taskReturnStatus = call_user_func_array(array($entryPoint[0], $entryPoint[1]), array($gearmanJob, $output));
-                    $output = ob_get_clean();
+                    $taskReturnStatus = call_user_func_array(array($entryPoint[0], $entryPoint[1]), array($gearmanJob, $bufferedOutput));
                 } catch (\Exception $e) {
-                    $output = ob_get_clean();
-                    $taskReturnStatus = false;
-
                     $job->setErrorOutput($e->getMessage());
                 }
 
@@ -256,12 +249,7 @@ class RunWorkerCommand extends ContainerAwareCommand
 
                 $job->setEndTime(new \DateTime());
                 $job->setReturnStatus($taskReturnStatus);
-                $job->setOutput($output);
-
-                // After event
-                $afterEvent = new JobEvent($gearmanJob, $job);
-                $this->getEventDispatcher()->dispatch(Events::JOB_FINISHED, $afterEvent);
-
+                $job->setOutput($bufferedOutput->fetch());
                 $manager->flush($job);
 
                 gc_collect_cycles();
